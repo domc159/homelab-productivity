@@ -1,292 +1,333 @@
-version: "3.9"
-
+version: '3.9'
 networks:
   homelab:
     driver: bridge
-
 services:
-  # ---------------------------
-  # FILEBROWSER (8060)
-  # ---------------------------
-  filebrowser:
-    image: filebrowser/filebrowser:latest
-    container_name: filebrowser
+  seafile_db:
+    image: mariadb:10.11
+    container_name: seafile-mysql
     restart: unless-stopped
-    networks: [homelab]
-    ports:
-      - "8060:80"
+    networks:
+    - homelab
     environment:
-      - TZ=${TZ}
+    - MYSQL_ROOT_PASSWORD=${SEAFILE_MYSQL_ROOT_PASSWORD}
+    - MYSQL_LOG_CONSOLE=true
     volumes:
-      - /home/homelab:/srv/homelab:rw
-      - /home/homelab_data:/srv/homelab_data:rw
-      - /home/homelab_data/filebrowser/database:/database
-      - /home/homelab_data/filebrowser/config:/config
-    command: ["--database", "/database/filebrowser.db", "--config", "/config/settings.json"]
-
-  # ---------------------------
-  # BENTOPDF (8061)
-  # ---------------------------
+    - /home/homelab_data/seafile/mysql:/var/lib/mysql
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
+    - /home/data:/home/data:rw
+  seafile_memcached:
+    image: memcached:1.6.18
+    container_name: seafile-memcached
+    restart: unless-stopped
+    networks:
+    - homelab
+    entrypoint: memcached -m 256
+    volumes:
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
+    - /home/data:/home/data:rw
+  seafile:
+    image: seafileltd/seafile-mc:11.0-latest
+    container_name: seafile
+    restart: unless-stopped
+    networks:
+    - homelab
+    ports:
+    - 8060:80
+    depends_on:
+    - seafile_db
+    - seafile_memcached
+    environment:
+    - TIME_ZONE=${TZ}
+    - DB_HOST=seafile_db
+    - DB_ROOT_PASSWD=${SEAFILE_MYSQL_ROOT_PASSWORD}
+    - SEAFILE_ADMIN_EMAIL=${SEAFILE_ADMIN_EMAIL}
+    - SEAFILE_ADMIN_PASSWORD=${SEAFILE_ADMIN_PASSWORD}
+    - SEAFILE_SERVER_LETSENCRYPT=false
+    - SEAFILE_SERVER_HOSTNAME=${SEAFILE_SERVER_HOSTNAME}
+    volumes:
+    - /home/homelab_data/seafile/data:/shared
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
+    - /home/data:/home/data:rw
   bentopdf:
     image: ghcr.io/alam00000/bentopdf:latest
     container_name: bentopdf
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     ports:
-      - "8061:8080"
+    - 8061:8080
     environment:
-      - TZ=${TZ}
+    - TZ=${TZ}
     volumes:
-      - /home/homelab:/mnt/homelab:rw
-      - /home/homelab_data:/mnt/homelab_data:rw
-
-  # ---------------------------
-  # IT-TOOLS (8062)
-  # ---------------------------
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   it-tools:
     image: corentinth/it-tools:latest
     container_name: it-tools
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     ports:
-      - "8062:80"
+    - 8062:80
     environment:
-      - TZ=${TZ}
+    - TZ=${TZ}
     volumes:
-      - /home/homelab:/mnt/homelab:rw
-      - /home/homelab_data:/mnt/homelab_data:rw
-
-  # ---------------------------
-  # FRESHRSS (8063)
-  # ---------------------------
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   freshrss:
     image: lscr.io/linuxserver/freshrss:latest
     container_name: freshrss
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     ports:
-      - "8063:80"
+    - 8063:80
     environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-      - CRON_MIN=0,15,30,45
+    - PUID=${PUID}
+    - PGID=${PGID}
+    - TZ=${TZ}
+    - CRON_MIN=0,15,30,45
     volumes:
-      - /home/homelab_data/freshrss/config:/config
-      - /home/homelab_data/freshrss/extensions:/extensions
-      - /home/homelab:/mnt/homelab:rw
-      - /home/homelab_data:/mnt/homelab_data:rw
-
-  # ---------------------------
-  # IMMICH (8064)
-  # ---------------------------
+    - /home/homelab_data/freshrss/config:/config
+    - /home/homelab_data/freshrss/extensions:/extensions
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   immich_redis:
     image: docker.io/valkey/valkey:9
     container_name: immich_redis
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     volumes:
-      - /home/homelab_data/immich/redis:/data
-
+    - /home/homelab_data/immich/redis:/data
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   immich_postgres:
     image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
     container_name: immich_postgres
     restart: unless-stopped
-    networks: [homelab]
-    env_file: [.env]
+    networks:
+    - homelab
+    env_file:
+    - .env
     environment:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_DB: ${DB_DATABASE_NAME}
-      POSTGRES_INITDB_ARGS: "--data-checksums"
+      POSTGRES_INITDB_ARGS: --data-checksums
     volumes:
-      - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
-    shm_size: "128mb"
-
+    - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
+    shm_size: 128mb
   immich_server:
     image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-release}
     container_name: immich_server
     restart: unless-stopped
-    networks: [homelab]
-    env_file: [.env]
+    networks:
+    - homelab
+    env_file:
+    - .env
     depends_on:
-      - immich_redis
-      - immich_postgres
+    - immich_redis
+    - immich_postgres
     ports:
-      - "8064:2283"
+    - 8064:2283
     volumes:
-      - ${UPLOAD_LOCATION}:/data
-      - /etc/localtime:/etc/localtime:ro
-      - /home/homelab:/mnt/homelab:rw
-      - /home/homelab_data:/mnt/homelab_data:rw
-
+    - ${UPLOAD_LOCATION}:/data
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   immich_machine_learning:
     image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-release}
     container_name: immich_machine_learning
     restart: unless-stopped
-    networks: [homelab]
-    env_file: [.env]
+    networks:
+    - homelab
+    env_file:
+    - .env
     volumes:
-      - /home/homelab_data/immich/model-cache:/cache
-
-  # ---------------------------
-  # JOPLIN (8065)
-  # ---------------------------
+    - /home/homelab_data/immich/model-cache:/cache
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   joplin_db:
     image: postgres:18
     container_name: joplin_postgres
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     environment:
       POSTGRES_DB: ${JOPLIN_DB_NAME}
       POSTGRES_USER: ${JOPLIN_DB_USER}
       POSTGRES_PASSWORD: ${JOPLIN_DB_PASSWORD}
     volumes:
-      - /home/homelab_data/joplin/postgres:/var/lib/postgresql
-
+    - /home/homelab_data/joplin/postgres:/var/lib/postgresql
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   joplin:
     image: joplin/server:latest
     container_name: joplin_server
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     depends_on:
-      - joplin_db
+    - joplin_db
     ports:
-      - "8065:22300"
+    - 8065:22300
     environment:
-      - TZ=${TZ}
-      - APP_PORT=22300
-      - APP_BASE_URL=${JOPLIN_BASE_URL}
-      - DB_CLIENT=pg
-      - POSTGRES_HOST=joplin_db
-      - POSTGRES_PORT=5432
-      - POSTGRES_DATABASE=${JOPLIN_DB_NAME}
-      - POSTGRES_USER=${JOPLIN_DB_USER}
-      - POSTGRES_PASSWORD=${JOPLIN_DB_PASSWORD}
+    - TZ=${TZ}
+    - APP_PORT=22300
+    - APP_BASE_URL=${JOPLIN_BASE_URL}
+    - DB_CLIENT=pg
+    - POSTGRES_HOST=joplin_db
+    - POSTGRES_PORT=5432
+    - POSTGRES_DATABASE=${JOPLIN_DB_NAME}
+    - POSTGRES_USER=${JOPLIN_DB_USER}
+    - POSTGRES_PASSWORD=${JOPLIN_DB_PASSWORD}
     volumes:
-      - /home/homelab:/mnt/homelab:rw
-      - /home/homelab_data:/mnt/homelab_data:rw
-
-  # ---------------------------
-  # PAPERLESS (8066)
-  # ---------------------------
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   paperless_redis:
     image: redis:8
     container_name: paperless_redis
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     volumes:
-      - /home/homelab_data/paperless/redis:/data
-
+    - /home/homelab_data/paperless/redis:/data
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   paperless_postgres:
     image: postgres:18
     container_name: paperless_postgres
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     environment:
       POSTGRES_DB: paperless
       POSTGRES_USER: paperless
       POSTGRES_PASSWORD: ${PAPERLESS_DB_PASSWORD}
     volumes:
-      - /home/homelab_data/paperless/postgres:/var/lib/postgresql
-
+    - /home/homelab_data/paperless/postgres:/var/lib/postgresql
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   paperless_gotenberg:
     image: gotenberg/gotenberg:8.26
     container_name: paperless_gotenberg
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     command:
-      - "gotenberg"
-      - "--chromium-disable-javascript=true"
-      - "--chromium-allow-list=file:///tmp/.*"
-
+    - gotenberg
+    - --chromium-disable-javascript=true
+    - --chromium-allow-list=file:///tmp/.*
+    volumes:
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   paperless_tika:
     image: apache/tika:latest
     container_name: paperless_tika
     restart: unless-stopped
-    networks: [homelab]
-
+    networks:
+    - homelab
+    volumes:
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   paperless:
     image: ghcr.io/paperless-ngx/paperless-ngx:latest
     container_name: paperless_webserver
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     depends_on:
-      - paperless_postgres
-      - paperless_redis
-      - paperless_gotenberg
-      - paperless_tika
+    - paperless_postgres
+    - paperless_redis
+    - paperless_gotenberg
+    - paperless_tika
     ports:
-      - "8066:8000"
+    - 8066:8000
     environment:
-      - USERMAP_UID=${USERMAP_UID}
-      - USERMAP_GID=${USERMAP_GID}
-      - TZ=${TZ}
-      - PAPERLESS_URL=${PAPERLESS_URL}
-      - PAPERLESS_SECRET_KEY=${PAPERLESS_SECRET_KEY}
-      - PAPERLESS_TIME_ZONE=${PAPERLESS_TIME_ZONE}
-      - PAPERLESS_OCR_LANGUAGE=${PAPERLESS_OCR_LANGUAGE}
-      - PAPERLESS_REDIS=redis://paperless_redis:6379
-      - PAPERLESS_DBHOST=paperless_postgres
-      - PAPERLESS_DBPORT=5432
-      - PAPERLESS_DBNAME=paperless
-      - PAPERLESS_DBUSER=paperless
-      - PAPERLESS_DBPASS=${PAPERLESS_DB_PASSWORD}
-      - PAPERLESS_TIKA_ENABLED=1
-      - PAPERLESS_TIKA_GOTENBERG_ENDPOINT=http://paperless_gotenberg:3000
-      - PAPERLESS_TIKA_ENDPOINT=http://paperless_tika:9998
+    - USERMAP_UID=${USERMAP_UID}
+    - USERMAP_GID=${USERMAP_GID}
+    - TZ=${TZ}
+    - PAPERLESS_URL=${PAPERLESS_URL}
+    - PAPERLESS_SECRET_KEY=${PAPERLESS_SECRET_KEY}
+    - PAPERLESS_TIME_ZONE=${PAPERLESS_TIME_ZONE}
+    - PAPERLESS_OCR_LANGUAGE=${PAPERLESS_OCR_LANGUAGE}
+    - PAPERLESS_REDIS=redis://paperless_redis:6379
+    - PAPERLESS_DBHOST=paperless_postgres
+    - PAPERLESS_DBPORT=5432
+    - PAPERLESS_DBNAME=paperless
+    - PAPERLESS_DBUSER=paperless
+    - PAPERLESS_DBPASS=${PAPERLESS_DB_PASSWORD}
+    - PAPERLESS_TIKA_ENABLED=1
+    - PAPERLESS_TIKA_GOTENBERG_ENDPOINT=http://paperless_gotenberg:3000
+    - PAPERLESS_TIKA_ENDPOINT=http://paperless_tika:9998
     volumes:
-      - /home/homelab_data/paperless/data:/usr/src/paperless/data
-      - /home/homelab_data/paperless/media:/usr/src/paperless/media
-      - /home/homelab_data/paperless/export:/usr/src/paperless/export
-      - /home/homelab_data/paperless/consume:/usr/src/paperless/consume
-      - /home/homelab:/mnt/homelab:rw
-      - /home/homelab_data:/mnt/homelab_data:rw
-
-  # ---------------------------
-  # N8N (8067)
-  # ---------------------------
+    - /home/homelab_data/paperless/data:/usr/src/paperless/data
+    - /home/homelab_data/paperless/media:/usr/src/paperless/media
+    - /home/homelab_data/paperless/export:/usr/src/paperless/export
+    - /home/homelab_data/paperless/consume:/usr/src/paperless/consume
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     ports:
-      - "8067:5678"
+    - 8067:5678
     environment:
-      - TZ=${TZ}
-      - GENERIC_TIMEZONE=${TZ}
-      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      - N8N_HOST=${N8N_HOST}
-      - N8N_PROTOCOL=${N8N_PROTOCOL}
-      - WEBHOOK_URL=${WEBHOOK_URL}
-      - NODE_ENV=production
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    - TZ=${TZ}
+    - GENERIC_TIMEZONE=${TZ}
+    - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+    - N8N_HOST=${N8N_HOST}
+    - N8N_PROTOCOL=${N8N_PROTOCOL}
+    - WEBHOOK_URL=${WEBHOOK_URL}
+    - NODE_ENV=production
+    - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
     volumes:
-      - /home/homelab_data/n8n/data:/home/node/.n8n
-      - /home/homelab_data/n8n/files:/files
-      - /home/homelab:/mnt/homelab:rw
-      - /home/homelab_data:/mnt/homelab_data:rw
-
-  # ---------------------------
-  # ONLYOFFICE (8068)
-  # ---------------------------
+    - /home/homelab_data/n8n/data:/home/node/.n8n
+    - /home/homelab_data/n8n/files:/files
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
   onlyoffice:
     image: onlyoffice/documentserver:latest
     container_name: onlyoffice
     restart: unless-stopped
-    networks: [homelab]
+    networks:
+    - homelab
     ports:
-      - "8068:80"
+    - 8068:80
     environment:
-      - TZ=${TZ}
-      - JWT_ENABLED=true
-      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET}
+    - TZ=${TZ}
+    - JWT_ENABLED=true
+    - JWT_SECRET=${ONLYOFFICE_JWT_SECRET}
     volumes:
-      - /home/homelab_data/onlyoffice/logs:/var/log/onlyoffice
-      - /home/homelab_data/onlyoffice/data:/var/www/onlyoffice/Data
-      - /home/homelab_data/onlyoffice/lib:/var/lib/onlyoffice
-      - /home/homelab_data/onlyoffice/postgres:/var/lib/postgresql
-      - /home/homelab:/mnt/homelab:rw
-      - /home/homelab_data:/mnt/homelab_data:rw
-    shm_size: "1gb"
+    - /home/homelab_data/onlyoffice/logs:/var/log/onlyoffice
+    - /home/homelab_data/onlyoffice/data:/var/www/onlyoffice/Data
+    - /home/homelab_data/onlyoffice/lib:/var/lib/onlyoffice
+    - /home/homelab_data/onlyoffice/postgres:/var/lib/postgresql
+    - /home/data:/home/data:rw
+    - /home/homelab:/home/homelab:rw
+    - /home/homelab_data:/home/homelab_data:rw
+    shm_size: 1gb
