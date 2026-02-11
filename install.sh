@@ -6,9 +6,10 @@ set -eu
 # ----------------------------
 HOMELAB_DIR="${HOMELAB_DIR:-/home/homelab}"
 HOMELAB_DATA_DIR="${HOMELAB_DATA_DIR:-/home/homelab_data}"
+DATA_DIR="${DATA_DIR:-/home/data}"
 
 # Host-exposed ports (must stay in 8060-8069)
-PORT_FILEBROWSER=8060
+PORT_SEAFILE=8060
 PORT_BENTOPDF=8061
 PORT_ITTOOLS=8062
 PORT_FRESHRSS=8063
@@ -156,11 +157,11 @@ make_dirs_and_perms() {
   target_uid="$(id -u "$target_user" 2>/dev/null || echo 0)"
   target_gid="$(id -g "$target_user" 2>/dev/null || echo 0)"
 
-  mkdir -p "$HOMELAB_DIR" "$HOMELAB_DATA_DIR"
+  mkdir -p "$HOMELAB_DIR" "$HOMELAB_DATA_DIR" "$DATA_DIR"
 
   mkdir -p \
-    "$HOMELAB_DATA_DIR/filebrowser/database" \
-    "$HOMELAB_DATA_DIR/filebrowser/config" \
+    "$HOMELAB_DATA_DIR/seafile/mysql" \
+    "$HOMELAB_DATA_DIR/seafile/data" \
     "$HOMELAB_DATA_DIR/bentopdf" \
     "$HOMELAB_DATA_DIR/it-tools" \
     "$HOMELAB_DATA_DIR/freshrss/config" \
@@ -183,8 +184,8 @@ make_dirs_and_perms() {
     "$HOMELAB_DATA_DIR/onlyoffice/lib" \
     "$HOMELAB_DATA_DIR/onlyoffice/postgres"
 
-  chmod 755 "$HOMELAB_DIR" "$HOMELAB_DATA_DIR" || true
-  chown -R "$target_uid:$target_gid" "$HOMELAB_DIR" "$HOMELAB_DATA_DIR" || true
+  chmod 755 "$HOMELAB_DIR" "$HOMELAB_DATA_DIR" "$DATA_DIR" || true
+  chown -R "$target_uid:$target_gid" "$HOMELAB_DIR" "$HOMELAB_DATA_DIR" "$DATA_DIR" || true
 
   # Postgres dirs (many images run as uid 999)
   for d in \
@@ -197,6 +198,13 @@ make_dirs_and_perms() {
     chmod 700 "$d" || true
   done
 
+# MariaDB/MySQL dirs (often uid 999)
+for d in     "$HOMELAB_DATA_DIR/seafile/mysql"
+do
+  chown -R 999:999 "$d" || true
+  chmod 700 "$d" || true
+done
+
   # Redis/Valkey dirs
   for d in \
     "$HOMELAB_DATA_DIR/paperless/redis" \
@@ -205,22 +213,6 @@ make_dirs_and_perms() {
     chown -R 999:999 "$d" || true
     chmod 770 "$d" || true
   done
-
-  # Filebrowser config default (if missing)
-  fb_cfg="$HOMELAB_DATA_DIR/filebrowser/config/settings.json"
-  if [ ! -f "$fb_cfg" ]; then
-    cat > "$fb_cfg" <<'JSON'
-{
-  "port": 80,
-  "address": "",
-  "log": "stdout",
-  "database": "/database/filebrowser.db",
-  "root": "/srv"
-}
-JSON
-    chown "$target_uid:$target_gid" "$fb_cfg" || true
-    chmod 644 "$fb_cfg" || true
-  fi
 }
 
 write_env() {
@@ -254,6 +246,14 @@ write_env() {
   if ! grep -q '^ONLYOFFICE_JWT_SECRET=' "$envfile" 2>/dev/null; then
     ensure_env_kv "ONLYOFFICE_JWT_SECRET" "$(rand_hex_32)" "$envfile"
   fi
+# Seafile
+if ! grep -q '^SEAFILE_MYSQL_ROOT_PASSWORD=' "$envfile" 2>/dev/null; then
+  ensure_env_kv "SEAFILE_MYSQL_ROOT_PASSWORD" "$(rand_alnum_32)" "$envfile"
+fi
+if ! grep -q '^SEAFILE_ADMIN_PASSWORD=' "$envfile" 2>/dev/null; then
+  ensure_env_kv "SEAFILE_ADMIN_PASSWORD" "$(rand_alnum_32)" "$envfile"
+fi
+
 
   # common
   ensure_env_kv "TZ" "$tz_default" "$envfile"
@@ -261,6 +261,10 @@ write_env() {
   ensure_env_kv "PGID" "$target_gid" "$envfile"
   ensure_env_kv "USERMAP_UID" "$target_uid" "$envfile"
   ensure_env_kv "USERMAP_GID" "$target_gid" "$envfile"
+# Seafile
+ensure_env_kv "SEAFILE_ADMIN_EMAIL" "${SEAFILE_ADMIN_EMAIL:-admin@local}" "$envfile"
+ensure_env_kv "SEAFILE_SERVER_HOSTNAME" "${SEAFILE_SERVER_HOSTNAME:-${host_ip}:${PORT_SEAFILE}}" "$envfile"
+
 
   # Immich
   ensure_env_kv "IMMICH_VERSION" "${IMMICH_VERSION:-release}" "$envfile"
@@ -323,12 +327,12 @@ main() {
   cd "$HOMELAB_DIR"
 
   $COMPOSE_CMD pull
-  $COMPOSE_CMD up -d
+  $COMPOSE_CMD up -d --remove-orphans
 
   ip="$(detect_host_ip)"
   log ""
   log "[OK] Stack je gor. URLji:"
-  log "  Filebrowser : http://${ip}:$PORT_FILEBROWSER"
+  log "  Seafile     : http://${ip}:$PORT_SEAFILE"
   log "  BentoPDF    : http://${ip}:$PORT_BENTOPDF"
   log "  IT-Tools    : http://${ip}:$PORT_ITTOOLS"
   log "  FreshRSS    : http://${ip}:$PORT_FRESHRSS"
