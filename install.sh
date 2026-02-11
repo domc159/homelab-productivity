@@ -110,13 +110,18 @@ pick_compose_cmd() {
 }
 
 detect_host_ip() {
+  # MUST return exactly one line (no newlines), otherwise sed replacements break.
   if have ip; then
-    ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}' || true
+    ipaddr="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+    [ -n "$ipaddr" ] && { printf "%s\n" "$ipaddr"; return; }
   fi
+
   if have hostname; then
-    hostname -I 2>/dev/null | awk '{print $1}' || true
+    ipaddr="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    [ -n "$ipaddr" ] && { printf "%s\n" "$ipaddr"; return; }
   fi
-  echo "127.0.0.1"
+
+  printf "127.0.0.1\n"
 }
 
 rand_alnum_32() {
@@ -133,8 +138,11 @@ ensure_env_kv() {
   val="$2"
   envfile="$3"
 
-  # escape for sed replacement (| and &)
-  esc_val=$(printf "%s" "$val" | sed 's/[|&]/\\&/g')
+  # safety: strip newlines (sed replacement can't handle raw newlines)
+  val="$(printf "%s" "$val" | tr '\n' ' ')"
+
+  # escape for sed replacement: backslash, | and &
+  esc_val="$(printf "%s" "$val" | sed 's/[\\|&]/\\&/g')"
 
   if grep -q "^${key}=" "$envfile" 2>/dev/null; then
     sed -i "s|^${key}=.*|${key}=${esc_val}|" "$envfile"
@@ -150,7 +158,6 @@ make_dirs_and_perms() {
 
   mkdir -p "$HOMELAB_DIR" "$HOMELAB_DATA_DIR"
 
-  # subtree (same as your current tree)
   mkdir -p \
     "$HOMELAB_DATA_DIR/filebrowser/database" \
     "$HOMELAB_DATA_DIR/filebrowser/config" \
@@ -179,8 +186,7 @@ make_dirs_and_perms() {
   chmod 755 "$HOMELAB_DIR" "$HOMELAB_DATA_DIR" || true
   chown -R "$target_uid:$target_gid" "$HOMELAB_DIR" "$HOMELAB_DATA_DIR" || true
 
-  # DB/redis dirs: make them writable for container users
-  # postgres images commonly run as uid 999
+  # Postgres dirs (many images run as uid 999)
   for d in \
     "$HOMELAB_DATA_DIR/joplin/postgres" \
     "$HOMELAB_DATA_DIR/paperless/postgres" \
@@ -191,7 +197,7 @@ make_dirs_and_perms() {
     chmod 700 "$d" || true
   done
 
-  # redis/valkey persistent dirs
+  # Redis/Valkey dirs
   for d in \
     "$HOMELAB_DATA_DIR/paperless/redis" \
     "$HOMELAB_DATA_DIR/immich/redis"
@@ -227,7 +233,6 @@ write_env() {
 
   host_ip="$(detect_host_ip)"
 
-  # defaults
   tz_default="${TZ:-Europe/Ljubljana}"
 
   # secrets (only generate if missing)
@@ -278,7 +283,7 @@ write_env() {
   ensure_env_kv "PAPERLESS_TIME_ZONE" "$tz_default" "$envfile"
   ensure_env_kv "PAPERLESS_OCR_LANGUAGE" "${PAPERLESS_OCR_LANGUAGE:-eng}" "$envfile"
 
-  # n8n (external URL uses 8067)
+  # n8n
   ensure_env_kv "N8N_HOST" "${N8N_HOST:-$host_ip}" "$envfile"
   ensure_env_kv "N8N_PROTOCOL" "${N8N_PROTOCOL:-http}" "$envfile"
   ensure_env_kv "WEBHOOK_URL" "${WEBHOOK_URL:-http://$host_ip:$PORT_N8N/}" "$envfile"
@@ -317,21 +322,21 @@ main() {
   log "[*] Deploy v: $HOMELAB_DIR"
   cd "$HOMELAB_DIR"
 
-  # pull + up
   $COMPOSE_CMD pull
   $COMPOSE_CMD up -d
 
+  ip="$(detect_host_ip)"
   log ""
   log "[OK] Stack je gor. URLji:"
-  log "  Filebrowser : http://$(detect_host_ip):$PORT_FILEBROWSER"
-  log "  BentoPDF    : http://$(detect_host_ip):$PORT_BENTOPDF"
-  log "  IT-Tools    : http://$(detect_host_ip):$PORT_ITTOOLS"
-  log "  FreshRSS    : http://$(detect_host_ip):$PORT_FRESHRSS"
-  log "  Immich      : http://$(detect_host_ip):$PORT_IMMICH"
-  log "  Joplin      : http://$(detect_host_ip):$PORT_JOPLIN"
-  log "  Paperless   : http://$(detect_host_ip):$PORT_PAPERLESS"
-  log "  n8n         : http://$(detect_host_ip):$PORT_N8N"
-  log "  OnlyOffice  : http://$(detect_host_ip):$PORT_ONLYOFFICE"
+  log "  Filebrowser : http://${ip}:$PORT_FILEBROWSER"
+  log "  BentoPDF    : http://${ip}:$PORT_BENTOPDF"
+  log "  IT-Tools    : http://${ip}:$PORT_ITTOOLS"
+  log "  FreshRSS    : http://${ip}:$PORT_FRESHRSS"
+  log "  Immich      : http://${ip}:$PORT_IMMICH"
+  log "  Joplin      : http://${ip}:$PORT_JOPLIN"
+  log "  Paperless   : http://${ip}:$PORT_PAPERLESS"
+  log "  n8n         : http://${ip}:$PORT_N8N"
+  log "  OnlyOffice  : http://${ip}:$PORT_ONLYOFFICE"
 }
 
 main "$@"
